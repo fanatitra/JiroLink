@@ -1,0 +1,99 @@
+{
+  "format": "JLT1",
+  "avertissement": "Clé racine de TEST uniquement. Voir docs/token-format.md.",
+  "cleRacineTestHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "valides": [
+    {
+      "deviceId": "A1B2C3D4E5F6",
+      "cleCompteurHex": "402c5d496cb82f811ba4d0210a55bd8112772296da1c97a0bb2e48c36e135413",
+      "sequenceIndex": 1,
+      "credits": 20,
+      "creditsCentiemes": 2000,
+      "enteteHex": "1000010007d0",
+      "enteteDecimal": "017592202823632",
+      "macDecimal": "01134240",
+      "token": "01759220282363201134240"
+    },
+    {
+      "deviceId": "A1B2C3D4E5F6",
+      "cleCompteurHex": "402c5d496cb82f811ba4d0210a55bd8112772296da1c97a0bb2e48c36e135413",
+      "sequenceIndex": 2,
+      "credits": 0.5,
+      "creditsCentiemes": 50,
+      "enteteHex": "100002000032",
+      "enteteDecimal": "017592219598898",
+      "macDecimal": "14994127",
+      "token": "01759221959889814994127"
+    },
+    {
+      "deviceId": "A1B2C3D4E5F7",
+      "cleCompteurHex": "e588c4f983865472051398b67b2f50670fe01f20c374e3e54d76e694643f4277",
+      "sequenceIndex": 1,
+      "credits": 20,
+      "creditsCentiemes": 2000,
+      "enteteHex": "1000010007d0",
+      "enteteDecimal": "017592202823632",
+      "macDecimal": "15810719",
+      "token": "01759220282363215810719"
+    },
+    {
+      "deviceId": "A1B2C3D4E5F6",
+      "cleCompteurHex": "402c5d496cb82f811ba4d0210a55bd8112772296da1c97a0bb2e48c36e135413",
+      "sequenceIndex": 7,
+      "credits": 123.45,
+      "creditsCentiemes": 12345,
+      "enteteHex": "100007003039",
+      "enteteDecimal": "017592303497273",
+      "macDecimal": "05817286",
+      "token": "01759230349727305817286"
+    },
+    {
+      "deviceId": "A1B2C3D4E5F6",
+      "cleCompteurHex": "402c5d496cb82f811ba4d0210a55bd8112772296da1c97a0bb2e48c36e135413",
+      "sequenceIndex": 1048575,
+      "credits": 167772.15,
+      "creditsCentiemes": 16777215,
+      "enteteHex": "1fffffffffff",
+      "enteteDecimal": "035184372088831",
+      "macDecimal": "01544502",
+      "token": "03518437208883101544502"
+    }
+  ],
+  "refus": [
+    {
+      "description": "Chiffre modifié (MAC invalide)",
+      "deviceId": "A1B2C3D4E5F6",
+      "code": "01759320282363201134240",
+      "dernierIndexAccepte": 0,
+      "erreurAttendue": "TOKEN_INVALIDE"
+    },
+    {
+      "description": "Token émis pour un autre compteur",
+      "deviceId": "A1B2C3D4E5F6",
+      "code": "01759220282363215810719",
+      "dernierIndexAccepte": 0,
+      "erreurAttendue": "TOKEN_INVALIDE"
+    },
+    {
+      "description": "Rejeu : index déjà accepté",
+      "deviceId": "A1B2C3D4E5F6",
+      "code": "01759220282363201134240",
+      "dernierIndexAccepte": 1,
+      "erreurAttendue": "TOKEN_REJOUE"
+    },
+    {
+      "description": "Longueur incorrecte",
+      "deviceId": "A1B2C3D4E5F6",
+      "code": "0175922028236320113424",
+      "dernierIndexAccepte": 0,
+      "erreurAttendue": "TOKEN_FORMAT_INVALIDE"
+    },
+    {
+      "description": "Caractère non numérique",
+      "deviceId": "A1B2C3D4E5F6",
+      "code": "x1759220282363201134240",
+      "dernierIndexAccepte": 0,
+      "erreurAttendue": "TOKEN_FORMAT_INVALIDE"
+    }
+  ]
+}

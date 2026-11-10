@@ -1,0 +1,13 @@
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16   # PostgreSQL + TimescaleDB (stack du cahier des charges)
+    environment:
+      POSTGRES_USER: jirolink
+      POSTGRES_PASSWORD: jirolink
+      POSTGRES_DB: jirolink
+    ports:
+      - "5432:5432"
+    volumes:
+      - jirolink_pgdata:/var/lib/postgresql/data
+volumes:
+  jirolink_pgdata:

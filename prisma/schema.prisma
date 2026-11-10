@@ -1,0 +1,606 @@
+// =====================================================================
+// JiroLink — schéma de persistance (Prisma / PostgreSQL)
+// Source : diagramme de classes Visual Paradigm (packages Prépaiement, Tarifs,
+// Compteurs, Supervision, Clients & Sites). 22 classes + 1 table technique.
+//
+// - Les noms de relations @relation("...") reprennent les libellés d'association
+//   du diagramme (Appartenir, Associer, Generer, Contenir, posseder, Peut avoir,
+//   s'appliquer, modifier, commander, peut configurer, Synchroniser, Avoir).
+// - « AJOUT » = absent du diagramme mais nécessaire (sécurité, cahier des charges, PDF).
+//   La liste complète est dans docs/correspondance-diagramme.md.
+// =====================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------
+// ENUMS
+// ---------------------------------------------------------------------
+
+enum TypeTenant {
+  PLATEFORME // tenant de l'opérateur JiroLink (techniciens Control Room, vue nationale)
+  MINI_CENTRALE
+  HOTEL
+  TELECOM
+}
+
+enum StatusTenant {
+  ACTIF
+  SUSPENDU
+}
+
+enum StatusUtilisateur {
+  ACTIF
+  DESACTIVE
+  VERROUILLE
+}
+
+enum StatutCompteur {
+  ENREGISTRE
+  ACTIF
+  MAINTENANCE
+  DESACTIVE
+}
+
+enum EtatConnexion {
+  EN_LIGNE
+  HORS_LIGNE
+}
+
+enum StatutLogement {
+  LIBRE
+  OCCUPE
+}
+
+enum StatusTarifProfil {
+  BROUILLON
+  PROGRAMME
+  ACTIF
+  ARCHIVE
+}
+
+enum TypeTransaction {
+  VENTE
+  RECHARGE_TOKEN
+  RECHARGE_DISTANTE
+  ANNULATION
+}
+
+enum StatusTransaction {
+  EN_ATTENTE
+  VALIDEE
+  ANNULEE
+  ECHOUEE
+}
+
+enum ModeDePaiement {
+  ESPECES
+  MOBILE_MONEY
+}
+
+enum StatusPaiement {
+  EN_ATTENTE
+  PAYE
+  REFUSE
+}
+
+enum StatusToken {
+  GENERE
+  UTILISE
+  EXPIRE
+}
+
+enum TypeSynchronisation {
+  TRANSACTIONS
+  CONFIGURATION
+  PROFIL_TARIFAIRE
+  FIRMWARE
+}
+
+enum StatusSynchronisation {
+  EN_ATTENTE
+  EN_COURS
+  TERMINEE
+  ECHEC
+  CONFLIT
+}
+
+enum EtatRelais {
+  OUVERT
+  FERME
+}
+
+enum TypeAlarme {
+  SURCHAUFFE
+  INTRUSION
+  COUPURE_ANORMALE
+  AUTRE
+}
+
+enum StatutAlarme {
+  DECLENCHEE
+  ACQUITTEE
+  CLOTUREE
+}
+
+enum CanalNotification {
+  SMS
+  EMAIL
+  PUSH
+  DASHBOARD
+}
+
+enum StatutNotification {
+  EN_ATTENTE
+  ENVOYEE
+  LUE
+  ECHEC
+}
+
+enum TypeCommande {
+  COUPER_RELAIS
+  REACTIVER_RELAIS
+  REDEMARRER
+  SYNC_HEURE
+  MODIFIER_CONFIG
+}
+
+enum StatutCommande {
+  EN_ATTENTE
+  ENVOYEE
+  EXECUTEE
+  ECHOUEE
+  EXPIREE
+}
+
+// ---------------------------------------------------------------------
+// ORGANISATION : Tenant ◇— Site ◇— Client ; Tenant ◇— Utilisateur ; Role —Utilisateur
+// ---------------------------------------------------------------------
+
+model Tenant {
+  idTenant     String       @id @default(uuid()) @db.Uuid
+  nom          String       @db.VarChar(150)
+  typeTenant   TypeTenant
+  statusTenant StatusTenant @default(ACTIF)
+  adresse      String?      @db.VarChar(255)
+  telephone    String?      @db.VarChar(30)
+  email        String?      @db.VarChar(150)
+  cin          String?      @db.VarChar(30) // donnée personnelle sensible : ne jamais journaliser ni exposer
+
+  sites        Site[]            @relation("tenant_site")
+  utilisateurs Utilisateur[]     @relation("Appartenir")
+  compteurs    Compteur[]        @relation("tenant_compteur") // AJOUT (RM8 pkg 3 + isolation)
+  profils      ProfilTarifaire[] @relation("tenant_profil") // AJOUT (isolation)
+  journaux     JournalAudit[]    @relation("tenant_journal")
+
+  @@map("tenant")
+}
+
+model Site {
+  idSite    String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  name      String   @db.VarChar(150)
+  // AJOUT : « attribute » est l'attribut par défaut de Visual Paradigm (non renseigné) ;
+  // remplacé par ce qu'exige la carte du Control Room (§07/§09 du cahier des charges).
+  province  String?  @db.VarChar(100)
+  latitude  Decimal? @db.Decimal(9, 6)
+  longitude Decimal? @db.Decimal(9, 6)
+
+  tenant  Tenant   @relation("tenant_site", fields: [tenantId], references: [idTenant])
+  clients Client[] @relation("site_client")
+
+  @@index([tenantId])
+  @@map("site")
+}
+
+model Client {
+  idClient String  @id @default(uuid()) @db.Uuid
+  siteId   String  @db.Uuid
+  nom      String  @db.VarChar(150)
+  prenom   String? @db.VarChar(150)
+  adresse  String? @db.VarChar(255)
+
+  site         Site                  @relation("site_client", fields: [siteId], references: [idSite])
+  logements    Logement[]            @relation("Avoir")
+  affectations AffectationCompteur[] @relation("Associer_client")
+
+  @@index([siteId])
+  @@map("client")
+}
+
+model Logement {
+  idLogement String         @id @default(uuid()) @db.Uuid
+  clientId   String         @db.Uuid
+  reference  String         @db.VarChar(50)
+  type       String?        @db.VarChar(50) // chambre, bail, local commercial…
+  statut     StatutLogement @default(LIBRE)
+
+  client Client @relation("Avoir", fields: [clientId], references: [idClient])
+
+  @@unique([clientId, reference])
+  @@map("logement")
+}
+
+model Role {
+  idRole      String   @id @default(uuid()) @db.Uuid
+  nom         String   @unique @db.VarChar(100) // AJOUT : nécessaire pour identifier un rôle (seed, administration)
+  description String?  @db.VarChar(255)
+  // Le diagramme porte « permission » comme attribut de Role (pas de classe Permission) :
+  // liste de codes "MODULE:ACTION" (voir src/common/permissions.ts).
+  permissions String[]
+
+  utilisateurs Utilisateur[] @relation("role_utilisateur")
+
+  @@map("role")
+}
+
+model Utilisateur {
+  idUtilisateur     String            @id @default(uuid()) @db.Uuid
+  tenantId          String            @db.Uuid
+  roleId            String            @db.Uuid
+  nom               String            @db.VarChar(100)
+  prenom            String            @db.VarChar(100)
+  email             String            @unique @db.VarChar(150) // stocké en minuscules
+  telephone         String?           @db.VarChar(30)
+  motDePasseHash    String            @db.VarChar(255) // le diagramme dit « motDePasse » : jamais en clair, hash bcrypt
+  statusUtilisateur StatusUtilisateur @default(ACTIF)
+  dateCreation      DateTime          @default(now())
+  derniereConnexion DateTime?
+
+  tenant             Tenant                  @relation("Appartenir", fields: [tenantId], references: [idTenant])
+  role               Role                    @relation("role_utilisateur", fields: [roleId], references: [idRole])
+  factures           Facture[]               @relation("Facture_utilisateur")
+  modificationsTarif ModificationTarif[]     @relation("modifier_utilisateur")
+  configurations     ConfigurationCompteur[] @relation("peut_configurer_utilisateur")
+  commandes          Commande[]              @relation("commander_utilisateur")
+  alarmesAcquittees  Alarme[]                @relation("acquitte_par")
+  journaux           JournalAudit[]          @relation("utilisateur_journal")
+
+  @@index([tenantId])
+  @@map("utilisateur")
+}
+
+// ---------------------------------------------------------------------
+// COMPTEUR
+// ---------------------------------------------------------------------
+
+model Compteur {
+  // Identifiant = adresse MAC, 12 hexadécimaux MAJUSCULES sans séparateur (ex. A4CF12345678).
+  // C'est aussi le deviceId MQTT : jirolink/{adresseMac}/telemetry
+  adresseMac        String         @id @db.VarChar(12)
+  tenantId          String         @db.Uuid // AJOUT (RM8 pkg 3 ; isolation par tenant ; compteur pas encore affecté)
+  numeroSerie       String         @unique @db.VarChar(100)
+  modele            String?        @db.VarChar(100)
+  versionFirmware   String?        @db.VarChar(30)
+  statutCompteur    StatutCompteur @default(ENREGISTRE)
+  etatConnexion     EtatConnexion  @default(HORS_LIGNE)
+  // Reflet du solde : le COMPTEUR fait autorité (cahier des charges §08/§10). Mis à jour par l'ack de recharge et la télémétrie.
+  solde             Decimal        @default(0) @db.Decimal(12, 2)
+  soldeMisAJourLe   DateTime? // AJOUT : ignorer les messages plus anciens (file hors ligne)
+  dernierIndexEmis  Int            @default(0) // AJOUT : séquence des tokens émis (anti-rejeu)
+  // AJOUT : authentification MQTT (hash bcrypt). La clé de signature des tokens est distincte :
+  // dérivée de TOKEN_ROOT_KEY, jamais stockée.
+  secretKeyHash     String         @db.VarChar(255)
+  profilTarifaireId String?        @db.Uuid // « s'appliquer » : le diagramme dit 1 ; exigé à l'activation
+
+  tenant           Tenant                  @relation("tenant_compteur", fields: [tenantId], references: [idTenant])
+  profilTarifaire  ProfilTarifaire?        @relation("s_appliquer", fields: [profilTarifaireId], references: [idProfile])
+  affectations     AffectationCompteur[]   @relation("Associer_compteur")
+  configurations   ConfigurationCompteur[] @relation("peut_configurer_compteur")
+  commandes        Commande[]              @relation("commander_compteur")
+  synchronisations Synchronisation[]       @relation("Synchroniser")
+  telemetries      Telemetrie[]            @relation("compteur_telemetrie")
+  alarmes          Alarme[]                @relation("compteur_alarme")
+  tokens           Token[]                 @relation("token_compteur")
+  journaux         JournalAudit[]          @relation("compteur_journal")
+
+  @@index([tenantId, statutCompteur])
+  @@map("compteur")
+}
+
+// Classe-association de « Associer » (Client 1..* — 1..* Compteur).
+// Active tant que dateFin est nulle. RM2 pkg 8 (un seul client actif par compteur) : index unique partiel
+// à ajouter dans la migration SQL (Prisma ne sait pas l'exprimer), voir README.
+model AffectationCompteur {
+  idAffectation String    @id @default(uuid()) @db.Uuid
+  clientId      String    @db.Uuid
+  compteurMac   String    @db.VarChar(12)
+  dateDebut     DateTime  @default(now())
+  dateFin       DateTime?
+
+  client   Client    @relation("Associer_client", fields: [clientId], references: [idClient])
+  compteur Compteur  @relation("Associer_compteur", fields: [compteurMac], references: [adresseMac])
+  factures Facture[] @relation("Facture_affectation")
+
+  @@index([compteurMac, dateFin])
+  @@index([clientId])
+  @@map("affectation_compteur")
+}
+
+// Classe-association de « peut configurer » (Utilisateur 0..* — 0..* Compteur). Une ligne par version.
+// Les trois attributs sont des documents JSON validés par le domaine (src/domain/compteurs.ts).
+model ConfigurationCompteur {
+  idConfiguration      String    @id @default(uuid()) @db.Uuid
+  compteurMac          String    @db.VarChar(12)
+  utilisateurId        String    @db.Uuid
+  version              Int       @default(1)
+  seuilsAlarme         Json // { seuilTemperature, hysteresisTemperature }
+  parametreReseau      Json // { intervalleTelemetrie, gsmActive }
+  optionFonctionnement Json // { alarmeIntrusionActive }
+  dateCreation         DateTime  @default(now())
+  dateModification     DateTime?
+
+  compteur    Compteur    @relation("peut_configurer_compteur", fields: [compteurMac], references: [adresseMac])
+  utilisateur Utilisateur @relation("peut_configurer_utilisateur", fields: [utilisateurId], references: [idUtilisateur])
+
+  @@unique([compteurMac, version])
+  @@map("configuration_compteur")
+}
+
+// Composition Compteur ◆— 1..* Synchronisation (« Synchroniser »)
+model Synchronisation {
+  idSynchronisation   String                @id @default(uuid()) @db.Uuid
+  compteurMac         String                @db.VarChar(12)
+  typeSynchronisation TypeSynchronisation
+  status              StatusSynchronisation @default(EN_ATTENTE)
+  dateDebut           DateTime              @default(now())
+  dateFin             DateTime? // le diagramme répète « dateDebut » (« datebut ») : lu comme dateFin
+  donnees             Json? // AJOUT : transactions hors ligne / détail à réconcilier (UC7 pkg 1)
+
+  compteur Compteur @relation("Synchroniser", fields: [compteurMac], references: [adresseMac], onDelete: Cascade)
+
+  @@index([compteurMac, status])
+  @@map("synchronisation")
+}
+
+// ---------------------------------------------------------------------
+// PRÉPAIEMENT : Transaction, Token, Facture
+// ---------------------------------------------------------------------
+
+model Transaction {
+  idTransaction     String            @id @default(uuid()) @db.Uuid
+  type              TypeTransaction
+  montant           Decimal           @db.Decimal(12, 2)
+  credits           Decimal           @db.Decimal(12, 2) // AJOUT : crédits correspondant au montant (nécessaire à l'émission du token)
+  statusTransaction StatusTransaction @default(EN_ATTENTE)
+  dateTransaction   DateTime          @default(now())
+  modeDePaiement    ModeDePaiement?
+  statusPaiement    StatusPaiement    @default(EN_ATTENTE)
+
+  facture Facture? @relation("Facture_transaction")
+  token   Token?   @relation("Generer")
+
+  @@index([dateTransaction])
+  @@map("transaction")
+}
+
+// Classe-association de l'association ternaire Utilisateur — AffectationCompteur — Transaction.
+// C'est elle qui rattache une transaction à son compteur (via l'affectation), à son client et à l'agent :
+// elle est donc créée en même temps que la transaction (une facture par transaction).
+model Facture {
+  idFacture     String   @id @default(uuid()) @db.Uuid
+  transactionId String   @unique @db.Uuid
+  affectationId String   @db.Uuid
+  utilisateurId String   @db.Uuid
+  dateFacture   DateTime @default(now())
+
+  transaction Transaction         @relation("Facture_transaction", fields: [transactionId], references: [idTransaction])
+  affectation AffectationCompteur @relation("Facture_affectation", fields: [affectationId], references: [idAffectation])
+  utilisateur Utilisateur         @relation("Facture_utilisateur", fields: [utilisateurId], references: [idUtilisateur])
+
+  @@index([affectationId])
+  @@index([utilisateurId])
+  @@map("facture")
+}
+
+// Token 0..1 — Generer — 1 Transaction (unique => au plus un token par transaction)
+model Token {
+  idToken        String      @id @default(uuid()) @db.Uuid
+  transactionId  String      @unique @db.Uuid
+  compteurMac    String      @db.VarChar(12) // AJOUT : porte l'anti-rejeu par compteur
+  codeHash       String      @unique @db.VarChar(128) // le diagramme dit « code » : jamais stocké en clair
+  status         StatusToken @default(GENERE)
+  sequenceIndex  Int // AJOUT : anti-rejeu (cahier des charges §08)
+  dateCreation   DateTime    @default(now())
+  dateExpiration DateTime // AJOUT (UC2 E3) : appliquée côté plateforme ; le compteur hors ligne ne peut pas l'imposer
+
+  transaction Transaction @relation("Generer", fields: [transactionId], references: [idTransaction])
+  compteur    Compteur    @relation("token_compteur", fields: [compteurMac], references: [adresseMac])
+
+  @@unique([compteurMac, sequenceIndex])
+  @@map("token")
+}
+
+// ---------------------------------------------------------------------
+// TARIFS
+// ---------------------------------------------------------------------
+
+model ProfilTarifaire {
+  idProfile         String            @id @default(uuid()) @db.Uuid
+  tenantId          String            @db.Uuid // AJOUT : isolation par tenant (le diagramme ne rattache le profil à rien)
+  nom               String            @db.VarChar(150)
+  description       String?           @db.VarChar(255)
+  statusTarifProfil StatusTarifProfil @default(BROUILLON) // diagramme : « statusTarifProil » (faute de frappe)
+  dateActivation    DateTime?
+  versionProfil     Int               @default(1) // RM2 pkg 2 : toute modification = nouvelle version
+
+  tenant        Tenant              @relation("tenant_profil", fields: [tenantId], references: [idTenant])
+  plages        PlageHoraire[]      @relation("Contenir")
+  joursFeries   JourFerie[]         @relation("posseder")
+  modifications ModificationTarif[] @relation("modifier_profil")
+  compteurs     Compteur[]          @relation("s_appliquer")
+
+  @@unique([tenantId, nom, versionProfil])
+  @@map("profil_tarifaire")
+}
+
+// Classe-association de « modifier » (Utilisateur * — 1..* ProfilTarifaire). Une ligne par modification.
+model ModificationTarif {
+  idModification   String   @id @default(uuid()) @db.Uuid
+  idProfile        String   @db.Uuid
+  utilisateurId    String   @db.Uuid
+  dateModification DateTime @default(now())
+
+  profil      ProfilTarifaire @relation("modifier_profil", fields: [idProfile], references: [idProfile])
+  utilisateur Utilisateur     @relation("modifier_utilisateur", fields: [utilisateurId], references: [idUtilisateur])
+
+  @@index([idProfile])
+  @@map("modification_tarif")
+}
+
+// Composition ProfilTarifaire ◆— 1..* PlageHoraire (« Contenir »)
+model PlageHoraire {
+  idPlageHoraire String   @id @default(uuid()) @db.Uuid
+  idProfile      String   @db.Uuid
+  libelle        String   @db.VarChar(100)
+  // Le diagramme nomme ces deux champs « dateDepart / dateFin » : ce sont des HEURES de la journée
+  // (jour, nuit, pointe…). Une plage peut franchir minuit (22:00 -> 06:00).
+  dateDepart     DateTime @db.Time(0)
+  dateFin        DateTime @db.Time(0)
+
+  profil       ProfilTarifaire    @relation("Contenir", fields: [idProfile], references: [idProfile], onDelete: Cascade)
+  coefficients TarifCoefficient[] @relation("Peut_avoir")
+
+  @@index([idProfile])
+  @@map("plage_horaire")
+}
+
+model TarifCoefficient {
+  idTarifCoef    String  @id @default(uuid()) @db.Uuid
+  idPlageHoraire String  @db.Uuid
+  valeur         Decimal @db.Decimal(6, 3)
+  priorite       Int     @default(0)
+
+  plage PlageHoraire @relation("Peut_avoir", fields: [idPlageHoraire], references: [idPlageHoraire], onDelete: Cascade)
+
+  @@index([idPlageHoraire])
+  @@map("tarif_coefficient")
+}
+
+// Agrégation ProfilTarifaire ◇— 1..* JourFerie (« posseder »)
+model JourFerie {
+  idJourFerie        String   @id @default(uuid()) @db.Uuid
+  idProfile          String   @db.Uuid
+  dateDebut          DateTime @db.Date
+  dateFin            DateTime @db.Date
+  libelle            String?  @db.VarChar(150)
+  specialCoefficient Decimal  @db.Decimal(6, 3)
+
+  profil ProfilTarifaire @relation("posseder", fields: [idProfile], references: [idProfile], onDelete: Cascade)
+
+  @@index([idProfile])
+  @@map("jour_ferie")
+}
+
+// ---------------------------------------------------------------------
+// SUPERVISION : Telemetrie, Alarme, Notification, Commande
+// ---------------------------------------------------------------------
+
+// Composition Compteur ◆— 1..* Telemetrie.
+// `timestamp` = heure DU COMPTEUR (la file hors ligne renvoie des mesures anciennes) ; `recuLe` = réception serveur.
+// La clé (idTelemetrie, timestamp) contient la colonne de partition exigée par TimescaleDB, et l'unicité
+// (compteurMac, timestamp) rend l'ingestion idempotente (QoS 1 peut livrer deux fois).
+// En production : SELECT create_hypertable('telemetrie','timestamp');
+model Telemetrie {
+  idTelemetrie String     @default(uuid()) @db.Uuid
+  compteurMac  String     @db.VarChar(12)
+  tension      Decimal?   @db.Decimal(6, 2)
+  courant      Decimal?   @db.Decimal(6, 2)
+  temperature  Decimal?   @db.Decimal(5, 2)
+  etatRelais   EtatRelais
+  timestamp    DateTime
+  recuLe       DateTime   @default(now()) // AJOUT
+  heapLibre    Int? // AJOUT : santé du firmware (cahier des charges §04)
+
+  compteur Compteur @relation("compteur_telemetrie", fields: [compteurMac], references: [adresseMac], onDelete: Cascade)
+
+  @@id([idTelemetrie, timestamp])
+  @@unique([compteurMac, timestamp])
+  @@map("telemetrie")
+}
+
+// Composition Compteur ◆— 1..* Alarme
+model Alarme {
+  idAlarme         String       @id @default(uuid()) @db.Uuid
+  compteurMac      String       @db.VarChar(12)
+  acquitteParId    String?      @db.Uuid // AJOUT : qui a acquitté (traçabilité)
+  type             TypeAlarme
+  dateCreation     DateTime     @default(now())
+  statut           StatutAlarme @default(DECLENCHEE)
+  message          String       @db.VarChar(500)
+  dateAcquittement DateTime?
+
+  compteur      Compteur       @relation("compteur_alarme", fields: [compteurMac], references: [adresseMac], onDelete: Cascade)
+  acquitteur    Utilisateur?   @relation("acquitte_par", fields: [acquitteParId], references: [idUtilisateur])
+  notifications Notification[] @relation("alarme_notification")
+
+  @@unique([compteurMac, type, dateCreation]) // idempotence (messages MQTT rejoués)
+  @@index([compteurMac, statut])
+  @@map("alarme")
+}
+
+// Composition Alarme ◆— 1..* Notification
+model Notification {
+  idNotification String             @id @default(uuid()) @db.Uuid
+  idAlarme       String             @db.Uuid
+  canal          CanalNotification
+  destinataire   String             @db.VarChar(150)
+  message        String             @db.VarChar(500)
+  statut         StatutNotification @default(EN_ATTENTE)
+  dateEnvoi      DateTime?
+  dateLecture    DateTime? // diagramme : « daateLecture »
+
+  alarme Alarme @relation("alarme_notification", fields: [idAlarme], references: [idAlarme], onDelete: Cascade)
+
+  @@index([idAlarme])
+  @@map("notification")
+}
+
+// Classe-association de « commander » (Utilisateur 0..* — 0..* Compteur)
+model Commande {
+  idCommande       String         @id @default(uuid()) @db.Uuid
+  compteurMac      String         @db.VarChar(12)
+  utilisateurId    String         @db.Uuid
+  type             TypeCommande
+  statut           StatutCommande @default(EN_ATTENTE)
+  dateCreation     DateTime       @default(now())
+  dateExecution    DateTime? // heure d'exécution rapportée par le compteur
+  dateConfirmation DateTime? // heure de réception de l'accusé côté plateforme
+  dateExpiration   DateTime // AJOUT (RM6 pkg 6 : une commande expirée est annulée)
+  payload          Json? // AJOUT : paramètres (ex. MODIFIER_CONFIG)
+
+  compteur    Compteur    @relation("commander_compteur", fields: [compteurMac], references: [adresseMac])
+  utilisateur Utilisateur @relation("commander_utilisateur", fields: [utilisateurId], references: [idUtilisateur])
+
+  @@index([compteurMac, statut])
+  @@map("commande")
+}
+
+// ---------------------------------------------------------------------
+// TECHNIQUE (hors diagramme) : journal d'audit — RM8 pkg 1, RM8 pkg 2, RM4 pkg 7
+// ---------------------------------------------------------------------
+
+model JournalAudit {
+  idEvenement   String   @id @default(uuid()) @db.Uuid
+  tenantId      String?  @db.Uuid
+  utilisateurId String?  @db.Uuid
+  compteurMac   String?  @db.VarChar(12)
+  typeEvenement String   @db.VarChar(50)
+  description   String?  @db.VarChar(255)
+  donneesAvant  Json?
+  donneesApres  Json?
+  horodatage    DateTime @default(now())
+
+  tenant      Tenant?      @relation("tenant_journal", fields: [tenantId], references: [idTenant])
+  utilisateur Utilisateur? @relation("utilisateur_journal", fields: [utilisateurId], references: [idUtilisateur])
+  compteur    Compteur?    @relation("compteur_journal", fields: [compteurMac], references: [adresseMac])
+
+  @@index([horodatage(sort: Desc)])
+  @@map("journal_audit")
+}
